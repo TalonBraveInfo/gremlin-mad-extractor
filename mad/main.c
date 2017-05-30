@@ -55,6 +55,8 @@ typedef struct __attribute__((packed)) MADIndex {
 } MADIndex;
 
 int main(int argc, char **argv) {
+    plInitialize(argc, argv, PL_SUBSYSTEM_IO);
+
     const char *arg;
     if((arg = plGetCommandLineArgument("extract")) && (arg[0] != '\0')) {
         if(!plFileExists(arg)) {
@@ -65,6 +67,11 @@ int main(int argc, char **argv) {
         FILE *file = fopen(arg, "rb");
         if(!file) {
             printf("Failed to load %s!\n", arg);
+            return -1;
+        }
+
+        if(!plCreateDirectory("./extract")) {
+            printf("Failed to create ./extract directory!\n");
             return -1;
         }
 
