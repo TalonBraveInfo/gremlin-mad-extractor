@@ -46,9 +46,7 @@ For more information, please refer to <http://unlicense.org>
  */
 
 typedef struct __attribute__((packed)) MADIndex {
-    char file[12];
-
-    int32_t padding0;
+    char file[16];
 
     uint32_t offset;
     uint32_t length;
