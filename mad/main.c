@@ -25,8 +25,14 @@ OTHER DEALINGS IN THE SOFTWARE.
 For more information, please refer to <http://unlicense.org>
 */
 
-#include <PL/platform.h>
-#include <PL/platform_filesystem.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <sys/stat.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <errno.h>
+#include <ctype.h>
+#include <string.h>
 
 /*  MAD/MTD Format Specification    */
 /* The MAD/MTD format is the package format used by
@@ -52,12 +58,87 @@ typedef struct __attribute__((packed)) MADIndex {
     uint32_t length;
 } MADIndex;
 
-int main(int argc, char **argv) {
-    plInitialize(argc, argv, PL_SUBSYSTEM_IO);
+/*************************************************************/
+/* File IO helper functions, pulled from 'platform'          */
 
+// Creates a folder at the given path.
+bool NewDirectory(const char *path) {
+    struct stat buffer;
+    if (stat(path, &buffer) == -1) {
+        if (mkdir(path, 0777) == 0)
+            return true;
+        else {
+            switch (errno) {
+                case EACCES:
+                    printf("Failed to get permission! (%s)\n", path);
+                case EROFS:
+                    printf("File system is read only! (%s)\n", path);
+                case ENAMETOOLONG:
+                    printf("Path is too long! (%s)\n", path);
+                default:
+                    printf("Failed to create directory! (%s)\n", path);
+            }
+        }
+    } else {
+        // Path already exists, so this is fine.
+        return true;
+    }
+
+    return false;
+}
+
+// Strips the extension from the filename.
+void StripExtension(char *dest, const char *in) {
+    if (in == NULL || in[0] == '\0') {
+        *dest = 0;
+        return;
+    }
+
+    const char *s = strrchr(in, '.');
+    while (in < s) *dest++ = *in++;
+    *dest = 0;
+}
+
+void LowerCasePath(char *out) {
+    for (int i = 0; out[i]; i++) {
+        out[i] = (char) tolower(out[i]);
+    }
+}
+
+// Returns a pointer to the last component in the given filename.
+const char *GetFileName(const char *path) {
+    const char *lslash = strrchr(path, '/');
+    if (lslash != NULL) {
+        path = lslash + 1;
+    }
+    return path;
+}
+
+// Returns the extension for the file.
+const char *GetFileExtension(const char *in) {
+    if (in == NULL || in[0] == '\0') {
+        return "";
+    }
+
+    const char *s = strrchr(in, '.');
+    if(!s || s == in) {
+        return "";
+    }
+
+    return s + 1;
+}
+
+bool FileExists(const char *path) {
+    struct stat buffer;
+    return (bool) (stat(path, &buffer) == 0);
+}
+
+/*************************************************************/
+
+int main(int argc, char **argv) {
     const char *arg;
     if((arg = plGetCommandLineArgument("extract")) && (arg[0] != '\0')) {
-        if(!plFileExists(arg)) {
+        if(!FileExists(arg)) {
             printf("Failed to find %s!\n", arg);
             return -1;
         }
@@ -68,20 +149,20 @@ int main(int argc, char **argv) {
             return -1;
         }
 
-        if(!plCreateDirectory("./extract")) {
+        if(!NewDirectory("./extract")) {
             printf("Failed to create ./extract directory!\n");
             return -1;
         }
 
-        char package_name[PL_SYSTEM_MAX_PATH] = { 0 };
-        plStripExtension(package_name, plGetFileName(arg));
-        plLowerCasePath(package_name);
+        char package_name[256] = { 0 };
+        StripExtension(package_name, GetFileName(arg));
+        LowerCasePath(package_name);
 
-        char package_extension[PL_SYSTEM_MAX_PATH] = { 0 };
-        snprintf(package_extension, sizeof(package_extension), "%s", plGetFileExtension(arg));
-        plLowerCasePath(package_extension);
+        char package_extension[256] = { 0 };
+        snprintf(package_extension, sizeof(package_extension), "%s", GetFileExtension(arg));
+        LowerCasePath(package_extension);
 
-        printf("Extracting %s...\n", plGetFileName(arg));
+        printf("Extracting %s...\n", GetFileName(arg));
 
         unsigned int lowest_offset = UINT32_MAX;
         unsigned int cur_index = 0;
@@ -91,7 +172,7 @@ int main(int argc, char **argv) {
 
             MADIndex index;
             if(fread(&index, sizeof(MADIndex), 1, file) != 1) {
-                printf("Unexpected index size for index %d, in %s!\n", cur_index, plGetFileName(arg));
+                printf("Unexpected index size for index %d, in %s!\n", cur_index, GetFileName(arg));
                 return -1;
             }
 
@@ -100,27 +181,26 @@ int main(int argc, char **argv) {
                 lowest_offset = index.offset;
             }
 
-            const char *ext = plGetFileExtension(index.file);
+            const char *ext = GetFileExtension(index.file);
             if(!ext || ext[0] == '\0') {
                 printf("Invalid extension for %s, skipping!\n", index.file);
                 continue;
             }
 
-            char file_path[PL_SYSTEM_MAX_PATH];
+            char file_path[256];
             snprintf(file_path, sizeof(file_path), "./extract/%s_%s", package_name, package_extension);
-            if(!plCreateDirectory(file_path)) {
+            if(!NewDirectory(file_path)) {
                 printf("Failed to create directory at %s!\n", file_path);
                 return -1;
             }
             snprintf(file_path, sizeof(file_path), "./extract/%s_%s/%s", package_name, package_extension, index.file);
 
-            plLowerCasePath(file_path);
+            LowerCasePath(file_path);
 
             fseek(file, index.offset, SEEK_SET);
             uint8_t *data = calloc(index.length, sizeof(uint8_t));
             if(fread(data, sizeof(uint8_t), index.length, file) == index.length) {
                 printf("Writing %s...\n", file_path);
-
                 FILE *out = fopen(file_path, "wb");
                 if(!out || fwrite(data, sizeof(uint8_t), index.length, out) != index.length) {
                     printf("Failed to write %s!\n", file_path);
