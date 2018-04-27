@@ -149,7 +149,6 @@ int main(int argc, char **argv) {
     }
 
     const char *mad_path = argv[1];
-    printf("Extracting %s . . .\n", mad_path);
 
     /*
     for(int i = 1; i < argc; ++i) {
