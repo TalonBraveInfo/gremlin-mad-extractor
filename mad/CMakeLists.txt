@@ -32,4 +32,4 @@ file(GLOB MAD_SOURCE_FILES *.c *.h)
 add_executable(mad ${MAD_SOURCE_FILES})
 
 target_include_directories(mad PUBLIC . ${CMAKE_SYSTEM_INCLUDE_PATH})
-target_link_libraries(mad platform)
+#target_link_libraries(mad platform)

@@ -33,6 +33,9 @@ For more information, please refer to <http://unlicense.org>
 #include <errno.h>
 #include <ctype.h>
 #include <string.h>
+#ifdef _WIN32
+#   include <io.h>
+#endif
 
 /*  MAD/MTD Format Specification    */
 /* The MAD/MTD format is the package format used by
@@ -65,7 +68,11 @@ typedef struct __attribute__((packed)) MADIndex {
 bool NewDirectory(const char *path) {
     struct stat buffer;
     if (stat(path, &buffer) == -1) {
+#ifdef _WIN32
+        if(mkdir(path) == 0)
+#else
         if (mkdir(path, 0777) == 0)
+#endif
             return true;
         else {
             switch (errno) {
@@ -136,85 +143,98 @@ bool FileExists(const char *path) {
 /*************************************************************/
 
 int main(int argc, char **argv) {
-    const char *arg;
-    if((arg = plGetCommandLineArgument("extract")) && (arg[0] != '\0')) {
-        if(!FileExists(arg)) {
-            printf("Failed to find %s!\n", arg);
-            return -1;
-        }
-
-        FILE *file = fopen(arg, "rb");
-        if(!file) {
-            printf("Failed to load %s!\n", arg);
-            return -1;
-        }
-
-        if(!NewDirectory("./extract")) {
-            printf("Failed to create ./extract directory!\n");
-            return -1;
-        }
-
-        char package_name[256] = { 0 };
-        StripExtension(package_name, GetFileName(arg));
-        LowerCasePath(package_name);
-
-        char package_extension[256] = { 0 };
-        snprintf(package_extension, sizeof(package_extension), "%s", GetFileExtension(arg));
-        LowerCasePath(package_extension);
-
-        printf("Extracting %s...\n", GetFileName(arg));
-
-        unsigned int lowest_offset = UINT32_MAX;
-        unsigned int cur_index = 0;
-        long position;
-        do {
-            cur_index++;
-
-            MADIndex index;
-            if(fread(&index, sizeof(MADIndex), 1, file) != 1) {
-                printf("Unexpected index size for index %d, in %s!\n", cur_index, GetFileName(arg));
-                return -1;
-            }
-
-            position = ftell(file);
-            if(lowest_offset > index.offset) {
-                lowest_offset = index.offset;
-            }
-
-            const char *ext = GetFileExtension(index.file);
-            if(!ext || ext[0] == '\0') {
-                printf("Invalid extension for %s, skipping!\n", index.file);
-                continue;
-            }
-
-            char file_path[256];
-            snprintf(file_path, sizeof(file_path), "./extract/%s_%s", package_name, package_extension);
-            if(!NewDirectory(file_path)) {
-                printf("Failed to create directory at %s!\n", file_path);
-                return -1;
-            }
-            snprintf(file_path, sizeof(file_path), "./extract/%s_%s/%s", package_name, package_extension, index.file);
-
-            LowerCasePath(file_path);
-
-            fseek(file, index.offset, SEEK_SET);
-            uint8_t *data = calloc(index.length, sizeof(uint8_t));
-            if(fread(data, sizeof(uint8_t), index.length, file) == index.length) {
-                printf("Writing %s...\n", file_path);
-                FILE *out = fopen(file_path, "wb");
-                if(!out || fwrite(data, sizeof(uint8_t), index.length, out) != index.length) {
-                    printf("Failed to write %s!\n", file_path);
-                    return -1;
-                }
-                fclose(out);
-            }
-            free(data);
-
-            fseek(file, position, SEEK_SET);
-        } while(position < lowest_offset);
-
-        fclose(file);
+    if(argc < 1) {
+        printf("Usage: mad <mad package path>\n");
+        return EXIT_SUCCESS;
     }
 
-    return 0;
+    const char *mad_path = argv[1];
+    printf("Extracting %s . . .\n", mad_path);
+
+    /*
+    for(int i = 1; i < argc; ++i) {
+
+    }
+     */
+
+    if(!FileExists(mad_path)) {
+        printf("Failed to find %s!\n", mad_path);
+        return EXIT_FAILURE;
+    }
+
+    FILE *file = fopen(mad_path, "rb");
+    if(!file) {
+        printf("Failed to load %s!\n", mad_path);
+        return EXIT_FAILURE;
+    }
+
+    if(!NewDirectory("./extract")) {
+        printf("Failed to create ./extract directory!\n");
+        return EXIT_FAILURE;
+    }
+
+    char package_name[256] = { 0 };
+    StripExtension(package_name, GetFileName(mad_path));
+    LowerCasePath(package_name);
+
+    char package_extension[256] = { 0 };
+    snprintf(package_extension, sizeof(package_extension), "%s", GetFileExtension(mad_path));
+    LowerCasePath(package_extension);
+
+    printf("Extracting %s...\n", GetFileName(mad_path));
+
+    unsigned int lowest_offset = UINT32_MAX;
+    unsigned int cur_index = 0;
+    long position;
+    do {
+        cur_index++;
+
+        MADIndex index;
+        if(fread(&index, sizeof(MADIndex), 1, file) != 1) {
+            printf("Unexpected index size for index %d, in %s!\n", cur_index, GetFileName(mad_path));
+            return EXIT_FAILURE;
+        }
+
+        position = ftell(file);
+        if(lowest_offset > index.offset) {
+            lowest_offset = index.offset;
+        }
+
+        const char *ext = GetFileExtension(index.file);
+        if(!ext || ext[0] == '\0') {
+            printf("Invalid extension for %s, skipping!\n", index.file);
+            continue;
+        }
+
+        char file_path[256];
+        snprintf(file_path, sizeof(file_path), "./extract/%s_%s", package_name, package_extension);
+        if(!NewDirectory(file_path)) {
+            printf("Failed to create directory at %s!\n", file_path);
+            return EXIT_FAILURE;
+        }
+        snprintf(file_path, sizeof(file_path), "./extract/%s_%s/%s", package_name, package_extension, index.file);
+
+        LowerCasePath(file_path);
+
+        fseek(file, (long) index.offset, SEEK_SET);
+        uint8_t *data = calloc(index.length, sizeof(uint8_t));
+        if(fread(data, sizeof(uint8_t), index.length, file) == index.length) {
+            printf("Writing %s...\n", file_path);
+            FILE *out = fopen(file_path, "wb");
+            if(!out || fwrite(data, sizeof(uint8_t), index.length, out) != index.length) {
+                printf("Failed to write %s!\n", file_path);
+                return EXIT_FAILURE;
+            }
+            fclose(out);
+        }
+        free(data);
+
+        fseek(file, position, SEEK_SET);
+    } while(position < lowest_offset);
+
+    fclose(file);
+
+    printf("DONE!\n");
+
+    return EXIT_SUCCESS;
 }
